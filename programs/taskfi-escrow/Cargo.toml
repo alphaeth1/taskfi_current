@@ -1,0 +1,22 @@
+[package]
+name = "taskfi-escrow"
+version = "0.1.0"
+description = "TaskFi Escrow Smart Contract for Solana"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "taskfi_escrow"
+
+[features]
+no-entrypoint = []
+no-idl = []
+no-log-ix-name = []
+cpi = ["no-entrypoint"]
+default = []
+
+[dependencies]
+anchor-lang = "0.28.0"
+anchor-spl = "0.28.0"
+spl-token = { version = "3.5.0", features = ["no-entrypoint"] }
+spl-associated-token-account = { version = "1.1.2", features = ["no-entrypoint"] }

@@ -1,0 +1,344 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  FREELANCER
+  HIRER
+  ADMIN
+}
+
+enum JobStatus {
+  OPEN
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+  DISPUTED
+}
+
+enum GigStatus {
+  ACTIVE
+  PAUSED
+  INACTIVE
+}
+
+enum PaymentStatus {
+  PENDING
+  ESCROW
+  RELEASED
+  REFUNDED
+  DISPUTED
+}
+
+enum MessageType {
+  TEXT
+  FILE
+  IMAGE
+  SYSTEM
+}
+
+model User {
+  id          String   @id @default(cuid())
+  walletAddress String @unique
+  name        String
+  username    String   @unique
+  bio         String?
+  avatarUrl   String?
+  role        UserRole
+  isVerified  Boolean  @default(false)
+  categories  String[] // For freelancers: array of skill categories
+  rating      Float    @default(0)
+  totalEarned Float    @default(0)
+  totalSpent  Float    @default(0)
+  isActive    Boolean  @default(true)
+  notificationSettings Json? // Store notification preferences
+  privacySettings      Json? // Store privacy preferences
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relationships
+  gigsAsFreelancer Gig[]           @relation("FreelancerGigs")
+  jobsAsHirer      Job[]           @relation("HirerJobs")
+  jobApplications  JobApplication[]
+  sentMessages     Message[]       @relation("MessageSender")
+  receivedMessages Message[]       @relation("MessageReceiver")
+  paymentsFrom     Payment[]       @relation("PaymentFrom")
+  paymentsTo       Payment[]       @relation("PaymentTo")
+  reviews          Review[]        @relation("ReviewAuthor")
+  receivedReviews  Review[]        @relation("ReviewTarget")
+  notifications    Notification[]
+  jobViews         JobView[]
+  walletTransactions WalletTransaction[]
+  uploadedFiles    UploadedFile[]
+
+  @@map("users")
+}
+
+model Category {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  description String?
+  icon        String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relationships
+  jobs Job[]
+  gigs Gig[]
+
+  @@map("categories")
+}
+
+model Job {
+  id            String    @id @default(cuid())
+  title         String
+  description   String
+  requirements  String[]
+  budget        Float
+  deadline      DateTime?
+  status        JobStatus @default(OPEN)
+  isUrgent      Boolean   @default(false)
+  attachments   String[]
+  tags          String[]
+  views         Int       @default(0)
+  applicantCount Int      @default(0)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  // Relationships
+  hirerId      String
+  hirer        User       @relation("HirerJobs", fields: [hirerId], references: [id], onDelete: Cascade)
+  categoryId   String
+  category     Category   @relation(fields: [categoryId], references: [id])
+  applications JobApplication[]
+  payments     Payment[]
+  messages     Message[]
+  reviews      Review[]
+  jobViews     JobView[]
+  uploadedFiles UploadedFile[]
+
+  @@map("jobs")
+}
+
+model Gig {
+  id           String    @id @default(cuid())
+  title        String
+  description  String
+  deliverables String[]
+  packages     Json // Different pricing tiers/packages
+  gallery      String[] // Images/videos showcasing work
+  tags         String[]
+  status       GigStatus @default(ACTIVE)
+  viewCount    Int       @default(0)
+  orderCount   Int       @default(0)
+  rating       Float     @default(0)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  // Relationships
+  freelancerId String
+  freelancer   User         @relation("FreelancerGigs", fields: [freelancerId], references: [id], onDelete: Cascade)
+  categoryId   String
+  category     Category     @relation(fields: [categoryId], references: [id])
+  applications JobApplication[]
+  payments     Payment[]
+  reviews      Review[]
+  uploadedFiles UploadedFile[]
+
+  @@map("gigs")
+}
+
+model JobApplication {
+  id          String   @id @default(cuid())
+  coverLetter String
+  proposedBudget Float
+  estimatedDays  Int
+  attachments    String[]
+  isAccepted     Boolean? // null = pending, true = accepted, false = rejected
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  // Relationships - EXCLUSIVE: one freelancer per job when accepted
+  freelancerId String
+  freelancer   User @relation(fields: [freelancerId], references: [id], onDelete: Cascade)
+  jobId        String?
+  job          Job? @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  gigId        String?
+  gig          Gig? @relation(fields: [gigId], references: [id], onDelete: Cascade)
+
+  // Ensure one application per freelancer per job/gig
+  @@unique([freelancerId, jobId])
+  @@unique([freelancerId, gigId])
+  @@map("job_applications")
+}
+
+model Message {
+  id        String      @id @default(cuid())
+  content   String
+  type      MessageType @default(TEXT)
+  fileUrl   String?
+  isRead    Boolean     @default(false)
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+
+  // Relationships - Messages are tied to specific jobs for 1:1 communication
+  senderId   String
+  sender     User   @relation("MessageSender", fields: [senderId], references: [id], onDelete: Cascade)
+  receiverId String
+  receiver   User   @relation("MessageReceiver", fields: [receiverId], references: [id], onDelete: Cascade)
+  jobId      String
+  job        Job    @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@map("messages")
+}
+
+model Payment {
+  id            String        @id @default(cuid())
+  amount        Float
+  currency      String        @default("USDC") // USDC, SOL
+  status        PaymentStatus @default(PENDING)
+  escrowAddress String? // Solana program address for escrow
+  transactionHash String?
+  releaseDate   DateTime?
+  disputeReason String?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  // Relationships
+  fromUserId String
+  fromUser   User @relation("PaymentFrom", fields: [fromUserId], references: [id], onDelete: Cascade)
+  toUserId   String
+  toUser     User @relation("PaymentTo", fields: [toUserId], references: [id], onDelete: Cascade)
+  jobId    String?
+  job      Job? @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  gigId    String?
+  gig      Gig? @relation(fields: [gigId], references: [id], onDelete: Cascade)
+
+  @@map("payments")
+}
+
+model Review {
+  id          String   @id @default(cuid())
+  rating      Int      // 1-5 stars
+  comment     String?
+  isPublic    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relationships
+  authorId String
+  author   User @relation("ReviewAuthor", fields: [authorId], references: [id], onDelete: Cascade)
+  targetId String
+  target   User @relation("ReviewTarget", fields: [targetId], references: [id], onDelete: Cascade)
+  jobId    String?
+  job      Job? @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  gigId    String?
+  gig      Gig? @relation(fields: [gigId], references: [id], onDelete: Cascade)
+
+  @@map("reviews")
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  title     String
+  message   String
+  type      String   // 'message', 'application', 'payment', 'job_update', 'system'
+  isRead    Boolean  @default(false)
+  actionUrl String?
+  metadata  Json?    // Additional data for notification
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relationships
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("notifications")
+}
+
+model PlatformStats {
+  id                String   @id @default(cuid())
+  totalUsers        Int      @default(0)
+  totalFreelancers  Int      @default(0)
+  totalHirers       Int      @default(0)
+  totalJobs         Int      @default(0)
+  totalGigs         Int      @default(0)
+  totalTransactions Int      @default(0)
+  totalVolume       Float    @default(0)
+  updatedAt         DateTime @updatedAt
+
+  @@map("platform_stats")
+}
+
+model JobView {
+  id        String   @id @default(cuid())
+  viewedAt  DateTime @default(now())
+  
+  // Relationships
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  jobId  String
+  job    Job    @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  
+  @@unique([userId, jobId])
+  @@map("job_views")
+}
+
+enum TransactionType {
+  DEPOSIT
+  WITHDRAWAL
+  EARNING
+  PAYMENT
+}
+
+enum TransactionStatus {
+  PENDING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+model WalletTransaction {
+  id        String            @id @default(cuid())
+  type      TransactionType
+  amount    Float
+  status    TransactionStatus @default(PENDING)
+  metadata  Json?             // Additional transaction details
+  createdAt DateTime          @default(now())
+  updatedAt DateTime          @updatedAt
+  
+  // Relationships
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@map("wallet_transactions")
+}
+
+model UploadedFile {
+  id          String   @id @default(cuid())
+  fileName    String
+  fileUrl     String
+  fileSize    Int
+  fileType    String
+  type        String   // 'job-attachment', 'gig-gallery', 'message-file'
+  createdAt   DateTime @default(now())
+  
+  // Relationships
+  uploadedById String
+  uploadedBy   User   @relation(fields: [uploadedById], references: [id], onDelete: Cascade)
+  jobId        String?
+  job          Job?   @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  gigId        String?
+  gig          Gig?   @relation(fields: [gigId], references: [id], onDelete: Cascade)
+  
+  @@map("uploaded_files")
+}
